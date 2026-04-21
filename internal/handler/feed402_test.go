@@ -15,7 +15,7 @@ import (
 // facilitator client + router), because the envelope / manifest helpers
 // should be independently testable.
 func newTestHandler(cfg *config.GatewayConfig) *Handler {
-	return &Handler{cfg: cfg}
+	return &Handler{cfg: cfg, hitParsers: defaultHitParsers()}
 }
 
 func testCfg() *config.GatewayConfig {
@@ -223,6 +223,49 @@ func TestWrapFeed402Envelope_NonJSONBody_StringifiedIntoData(t *testing.T) {
 	}
 	if !strings.Contains(s, "PubmedArticleSet") {
 		t.Errorf("data did not contain upstream xml; got %q", s)
+	}
+}
+
+func TestWrapFeed402Envelope_SearchTier_EmitsHits(t *testing.T) {
+	cfg := testCfg()
+	h := newTestHandler(cfg)
+	route := &cfg.Routes[0] // pubmed-search
+	req := mustReq(t, "https://api.example.com/research/pubmed/search?term=caloric")
+
+	body := []byte(`{"esearchresult":{"idlist":["38831607","34588695","11111111"]}}`)
+	wrapped, err := h.wrapFeed402Envelope(route, body, "0xabc", "0xtx", req)
+	if err != nil {
+		t.Fatalf("wrap: %v", err)
+	}
+	var env feed402Envelope
+	if err := json.Unmarshal(wrapped, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(env.Hits) != 3 {
+		t.Fatalf("hits: got %d want 3", len(env.Hits))
+	}
+	if env.Hits[0].SourceID != "pubmed:38831607" {
+		t.Errorf("hits[0].source_id: got %q", env.Hits[0].SourceID)
+	}
+	if env.Hits[0].CanonicalURL != "https://pubmed.ncbi.nlm.nih.gov/38831607/" {
+		t.Errorf("hits[0].canonical_url: got %q", env.Hits[0].CanonicalURL)
+	}
+	if env.Hits[0].Rank != 1 || env.Hits[2].Rank != 3 {
+		t.Errorf("ranks should be 1..N; got %d, %d", env.Hits[0].Rank, env.Hits[2].Rank)
+	}
+}
+
+func TestWrapFeed402Envelope_RawTier_NoHits(t *testing.T) {
+	cfg := testCfg()
+	h := newTestHandler(cfg)
+	route := &cfg.Routes[1] // pubmed-fetch (raw)
+	req := mustReq(t, "https://api.example.com/research/pubmed/fetch?id=38831607")
+
+	wrapped, _ := h.wrapFeed402Envelope(route, []byte(`{"abstract":"..."}`), "0xabc", "0xtx", req)
+	var env feed402Envelope
+	_ = json.Unmarshal(wrapped, &env)
+	if env.Hits != nil {
+		t.Errorf("raw-tier envelopes should not emit hits; got %v", env.Hits)
 	}
 }
 

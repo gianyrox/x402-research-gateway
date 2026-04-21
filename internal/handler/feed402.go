@@ -87,7 +87,14 @@ type feed402Receipt struct {
 type feed402Envelope struct {
 	Data     json.RawMessage       `json:"data"`
 	Citation feed402CitationSource `json:"citation"`
-	Receipt  feed402Receipt        `json:"receipt"`
+	// Hits is an optional v0.2-additive field: on search-tier responses
+	// the gateway extracts per-record re-verification handles
+	// (source_id + canonical_url + rank) so agents can re-fetch or
+	// re-cite individual results. Absent when the route isn't a search
+	// or the upstream body shape isn't recognized. Spec §2.3 unknown-
+	// field rule guarantees v0.1 agents ignore it safely.
+	Hits    []feed402Hit   `json:"hits,omitempty"`
+	Receipt feed402Receipt `json:"receipt"`
 }
 
 // ---------- Manifest builder ----------
@@ -210,9 +217,19 @@ func (h *Handler) wrapFeed402Envelope(
 		tx = "pending:" + shortHash(payer, req.URL.Path, req.URL.RawQuery)
 	}
 
+	// Extract per-hit provenance if the route has a registered parser
+	// (search-tier routes on recognized upstreams).
+	var hits []feed402Hit
+	if h.hitParsers != nil {
+		if parser, ok := h.hitParsers[route.ID]; ok {
+			hits = parser(route, upstreamBody)
+		}
+	}
+
 	env := feed402Envelope{
 		Data:     dataField,
 		Citation: citation,
+		Hits:     hits,
 		Receipt: feed402Receipt{
 			Tier:     route.Feed402Tier,
 			PriceUSD: price,

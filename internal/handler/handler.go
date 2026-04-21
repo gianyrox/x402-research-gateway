@@ -27,6 +27,7 @@ type Handler struct {
 	x402srv    *x402http.HTTPServer
 	routeIndex map[string]*config.RouteConfig // "GET /path" -> config
 	httpClient *http.Client
+	hitParsers map[string]hitParser // route.ID -> per-upstream hit extractor
 }
 
 // chiHTTPAdapter implements x402http.HTTPAdapter for net/http requests.
@@ -84,6 +85,7 @@ func NewHandler(cfg *config.GatewayConfig) *Handler {
 		x402srv:    x402srv,
 		routeIndex: routeIndex,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		hitParsers: defaultHitParsers(),
 	}
 
 	h.router.Use(chimw.RequestID)
